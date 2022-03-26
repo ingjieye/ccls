@@ -76,9 +76,9 @@ struct Config {
     struct Workspace {
       struct WorkspaceFolders {
         // Set to false if you don't want workspace folders.
-        bool supported = true;
+        bool supported = false;
 
-        bool changeNotifications = true;
+        bool changeNotifications = false;
       } workspaceFolders;
     } workspace;
   } capabilities;

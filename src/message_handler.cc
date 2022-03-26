@@ -188,11 +188,11 @@ MessageHandler::MessageHandler() {
   bind("textDocument/rename", &MessageHandler::textDocument_rename);
   bind("textDocument/signatureHelp", &MessageHandler::textDocument_signatureHelp);
   bind("textDocument/typeDefinition", &MessageHandler::textDocument_typeDefinition);
-  bind("workspace/didChangeConfiguration", &MessageHandler::workspace_didChangeConfiguration);
-  bind("workspace/didChangeWatchedFiles", &MessageHandler::workspace_didChangeWatchedFiles);
-  bind("workspace/didChangeWorkspaceFolders", &MessageHandler::workspace_didChangeWorkspaceFolders);
-  bind("workspace/executeCommand", &MessageHandler::workspace_executeCommand);
-  bind("workspace/symbol", &MessageHandler::workspace_symbol);
+  //bind("workspace/didChangeConfiguration", &MessageHandler::workspace_didChangeConfiguration);
+  //bind("workspace/didChangeWatchedFiles", &MessageHandler::workspace_didChangeWatchedFiles);
+  //bind("workspace/didChangeWorkspaceFolders", &MessageHandler::workspace_didChangeWorkspaceFolders);
+  //bind("workspace/executeCommand", &MessageHandler::workspace_executeCommand);
+  //bind("workspace/symbol", &MessageHandler::workspace_symbol);
   // clang-format on
 }
 
