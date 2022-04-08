@@ -191,8 +191,8 @@ MessageHandler::MessageHandler() {
   //bind("workspace/didChangeConfiguration", &MessageHandler::workspace_didChangeConfiguration);
   //bind("workspace/didChangeWatchedFiles", &MessageHandler::workspace_didChangeWatchedFiles);
   //bind("workspace/didChangeWorkspaceFolders", &MessageHandler::workspace_didChangeWorkspaceFolders);
-  //bind("workspace/executeCommand", &MessageHandler::workspace_executeCommand);
-  //bind("workspace/symbol", &MessageHandler::workspace_symbol);
+  bind("workspace/executeCommand", &MessageHandler::workspace_executeCommand);
+  bind("workspace/symbol", &MessageHandler::workspace_symbol);
   // clang-format on
 }
 
