@@ -14,7 +14,6 @@
 namespace ccls {
 struct SemaManager;
 struct VFS;
-struct IncludeComplete;
 struct Project;
 struct WorkingFile;
 struct WorkingFiles;
@@ -41,6 +40,11 @@ struct RenameParam {
   Position position;
   std::string newName;
 };
+struct SemanticTokensRangeParams {
+  TextDocumentIdentifier textDocument;
+  lsRange range;
+};
+REFLECT_STRUCT(SemanticTokensRangeParams, textDocument, range);
 struct TextDocumentParam {
   TextDocumentIdentifier textDocument;
 };
@@ -239,7 +243,6 @@ struct ReplyOnce {
 struct MessageHandler {
   SemaManager *manager = nullptr;
   DB *db = nullptr;
-  IncludeComplete *include_complete = nullptr;
   Project *project = nullptr;
   VFS *vfs = nullptr;
   WorkingFiles *wfiles = nullptr;
@@ -305,7 +308,10 @@ private:
                                     ReplyOnce &);
   void textDocument_references(JsonReader &, ReplyOnce &);
   void textDocument_rename(RenameParam &, ReplyOnce &);
+  void textDocument_semanticTokensFull(TextDocumentParam &, ReplyOnce &);
+  void textDocument_semanticTokensRange(SemanticTokensRangeParams &, ReplyOnce &);
   void textDocument_signatureHelp(TextDocumentPositionParam &, ReplyOnce &);
+  void textDocument_switchSourceHeader(TextDocumentIdentifier &, ReplyOnce &);
   void textDocument_typeDefinition(TextDocumentPositionParam &, ReplyOnce &);
   void workspace_didChangeConfiguration(EmptyParam &);
   void workspace_didChangeWatchedFiles(DidChangeWatchedFilesParam &);

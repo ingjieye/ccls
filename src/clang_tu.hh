@@ -10,19 +10,21 @@
 #include <clang/Basic/SourceManager.h>
 #include <clang/Frontend/CompilerInstance.h>
 
-#if LLVM_VERSION_MAJOR < 8
-// D52783 Lift VFS from clang to llvm
-namespace llvm {
-namespace vfs = clang::vfs;
-}
-#endif
-
 #if LLVM_VERSION_MAJOR < 14 // llvmorg-14-init-3863-g601102d282d5
 #define isAsciiIdentifierContinue isIdentifierBody
 #endif
 
+#if LLVM_VERSION_MAJOR >= 19
+#define startswith starts_with
+#define endswith ends_with
+#endif
+
 namespace ccls {
+#if LLVM_VERSION_MAJOR < 19
 std::string pathFromFileEntry(const clang::FileEntry &file);
+#else
+std::string pathFromFileEntry(clang::FileEntryRef file);
+#endif
 
 bool isInsideMainFile(const clang::SourceManager &sm, clang::SourceLocation sl);
 

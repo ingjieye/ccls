@@ -1,7 +1,6 @@
 // Copyright 2017-2018 ccls Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "include_complete.hh"
 #include "message_handler.hh"
 #include "pipeline.hh"
 #include "project.hh"
@@ -38,7 +37,6 @@ void MessageHandler::textDocument_didOpen(DidOpenTextDocumentParam &param) {
     emitSkippedRanges(wf, *file);
     emitSemanticHighlight(db, wf, *file);
   }
-  include_complete->addFile(wf->filename);
 
   // Submit new index request if it is not a header file or there is no
   // pending index request.
@@ -50,6 +48,20 @@ void MessageHandler::textDocument_didOpen(DidOpenTextDocumentParam &param) {
     project->indexRelated(path);
 
   manager->onView(path);
+
+  // For the first few didOpen, sort indexer requests based on path similarity.
+  if (++pipeline::stats.opened >= 5)
+    return;
+  std::unordered_map<std::string, int> dir2prio;
+  {
+    std::lock_guard lock(wfiles->mutex);
+    for (auto &[f, wf] : wfiles->files) {
+      std::string cur = lowerPathIfInsensitive(f);
+      for (int pri = 1 << 20; !(cur = llvm::sys::path::parent_path(cur)).empty(); pri /= 2)
+        dir2prio[cur] += pri;
+    }
+  }
+  pipeline::indexerSort(dir2prio);
 }
 
 void MessageHandler::textDocument_didSave(TextDocumentParam &param) {

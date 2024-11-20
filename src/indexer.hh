@@ -18,6 +18,11 @@
 #include <unordered_map>
 #include <vector>
 
+#if LLVM_VERSION_MAJOR >= 19
+#define startswith starts_with
+#define endswith ends_with
+#endif
+
 namespace std {
 template <> struct hash<clang::FileID> {
   std::size_t operator()(clang::FileID fid) const { return fid.getHashValue(); }
@@ -126,6 +131,12 @@ void reflect(BinaryReader &visitor, DeclRef &value);
 void reflect(BinaryWriter &visitor, SymbolRef &value);
 void reflect(BinaryWriter &visitor, Use &value);
 void reflect(BinaryWriter &visitor, DeclRef &value);
+
+enum class TokenModifier {
+#define TOKEN_MODIFIER(name, str) name,
+#include "enum.inc"
+#undef TOKEN_MODIFIER
+};
 
 template <typename T> using VectorAdapter = std::vector<T, std::allocator<T>>;
 

@@ -28,6 +28,14 @@
 
 using namespace clang;
 
+#if LLVM_VERSION_MAJOR >= 18 // llvmorg-18-init-10631-gedd690b02e16
+#define TTK_Class TagTypeKind::Class
+#define TTK_Enum TagTypeKind::Enum
+#define TTK_Interface TagTypeKind::Interface
+#define TTK_Struct TagTypeKind::Struct
+#define TTK_Union TagTypeKind::Union
+#endif
+
 namespace ccls {
 namespace {
 
@@ -60,7 +68,11 @@ struct IndexParam {
     // generating an index for it):
     auto [it, inserted] = uid2file.try_emplace(fid);
     if (inserted) {
+#if LLVM_VERSION_MAJOR < 19
       const FileEntry *fe = ctx->getSourceManager().getFileEntryForID(fid);
+#else
+      OptionalFileEntryRef fe = ctx->getSourceManager().getFileEntryRefForID(fid);
+#endif
       if (!fe)
         return;
       std::string path = pathFromFileEntry(*fe);
@@ -86,9 +98,14 @@ struct IndexParam {
 
   bool useMultiVersion(FileID fid) {
     auto it = uid2multi.try_emplace(fid);
-    if (it.second)
+    if (it.second) {
+#if LLVM_VERSION_MAJOR < 19
       if (const FileEntry *fe = ctx->getSourceManager().getFileEntryForID(fid))
+#else
+      if (OptionalFileEntryRef fe = ctx->getSourceManager().getFileEntryRefForID(fid))
+#endif
         it.first->second = multiVersionMatcher->matches(pathFromFileEntry(*fe));
+    }
     return it.first->second;
   }
 };
@@ -628,7 +645,11 @@ public:
   static int getFileLID(IndexFile *db, SourceManager &sm, FileID fid) {
     auto [it, inserted] = db->uid2lid_and_path.try_emplace(fid);
     if (inserted) {
+#if LLVM_VERSION_MAJOR < 19
       const FileEntry *fe = sm.getFileEntryForID(fid);
+#else
+      OptionalFileEntryRef fe = sm.getFileEntryRefForID(fid);
+#endif
       if (!fe) {
         it->second.first = -1;
         return -1;
@@ -689,9 +710,6 @@ public:
 public:
   IndexDataConsumer(IndexParam &param) : param(param) {}
   void initialize(ASTContext &ctx) override { this->ctx = param.ctx = &ctx; }
-#if LLVM_VERSION_MAJOR < 10 // llvmorg-10-init-12036-g3b9715cb219
-# define handleDeclOccurrence handleDeclOccurence
-#endif
   bool handleDeclOccurrence(const Decl *d, index::SymbolRoleSet roles,
                             ArrayRef<index::SymbolRelation> relations,
                             SourceLocation src_loc,
@@ -878,31 +896,6 @@ public:
             if (!isa<EnumConstantDecl>(d))
               db->toType(usr1).instances.push_back(usr);
           } else if (const Decl *d1 = getAdjustedDecl(getTypeDecl(t))) {
-#if LLVM_VERSION_MAJOR < 9
-            if (isa<TemplateTypeParmDecl>(d1)) {
-              // e.g. TemplateTypeParmDecl is not handled by
-              // handleDeclOccurence.
-              SourceRange sr1 = d1->getSourceRange();
-              if (sm.getFileID(sr1.getBegin()) == fid) {
-                IndexParam::DeclInfo *info1;
-                Usr usr1 = getUsr(d1, &info1);
-                IndexType &type1 = db->toType(usr1);
-                SourceLocation sl1 = d1->getLocation();
-                type1.def.spell = {
-                    Use{{fromTokenRange(sm, lang, {sl1, sl1}), Role::Definition},
-                        lid},
-                    fromTokenRange(sm, lang, sr1)};
-                type1.def.detailed_name = intern(info1->short_name);
-                type1.def.short_name_size = int16_t(info1->short_name.size());
-                type1.def.kind = SymbolKind::TypeParameter;
-                type1.def.parent_kind = SymbolKind::Class;
-                var->def.type = usr1;
-                type1.instances.push_back(usr);
-                break;
-              }
-            }
-#endif
-
             IndexParam::DeclInfo *info1;
             Usr usr1 = getUsr(d1, &info1);
             var->def.type = usr1;
@@ -1105,7 +1098,10 @@ public:
                           const FileEntry *file,
 #endif
                           StringRef searchPath, StringRef relativePath,
-                          const Module *imported,
+                          const clang::Module *suggestedModule,
+#if LLVM_VERSION_MAJOR >= 19 // llvmorg-19-init-1720-gda95d926f6fc
+                          bool moduleImported,
+#endif
                           SrcMgr::CharacteristicKind fileType) override {
 #if LLVM_VERSION_MAJOR >= 15 // llvmorg-15-init-7692-gd79ad2f1dbc2
     const FileEntry *file = fileRef ? &fileRef->getFileEntry() : nullptr;
@@ -1116,7 +1112,11 @@ public:
                                      filenameRange, nullptr);
     FileID fid = sm.getFileID(filenameRange.getBegin());
     if (IndexFile *db = param.consumeFile(fid)) {
+#if LLVM_VERSION_MAJOR < 19
       std::string path = pathFromFileEntry(*file);
+#else
+      std::string path = pathFromFileEntry(*fileRef);
+#endif
       if (path.size())
         db->includes.push_back({spell.start.line, intern(path)});
     }
@@ -1209,10 +1209,8 @@ public:
         std::make_unique<IndexPPCallbacks>(pp->getSourceManager(), param));
     std::vector<std::unique_ptr<ASTConsumer>> consumers;
     consumers.push_back(std::make_unique<SkipProcessed>(param));
-#if LLVM_VERSION_MAJOR >= 10 // rC370337
     consumers.push_back(index::createIndexingASTConsumer(
         dataConsumer, indexOpts, std::move(pp)));
-#endif
     return std::make_unique<MultiplexConsumer>(std::move(consumers));
   }
 };
@@ -1294,9 +1292,15 @@ index(SemaManager *manager, WorkingFiles *wfiles, VFS *vfs,
   ok = false;
   // -fparse-all-comments enables documentation in the indexer and in
   // code completion.
+#if LLVM_VERSION_MAJOR >= 18
+  ci->getLangOpts().CommentOpts.ParseAllComments =
+      g_config->index.comments > 1;
+  ci->getLangOpts().RetainCommentsFromSystemHeaders = true;
+#else
   ci->getLangOpts()->CommentOpts.ParseAllComments =
       g_config->index.comments > 1;
   ci->getLangOpts()->RetainCommentsFromSystemHeaders = true;
+#endif
   std::string buf = wfiles->getContent(main);
   std::vector<std::unique_ptr<llvm::MemoryBuffer>> bufs;
   if (buf.size())
@@ -1315,12 +1319,7 @@ index(SemaManager *manager, WorkingFiles *wfiles, VFS *vfs,
   if (!clang->hasTarget())
     return {};
   clang->getPreprocessorOpts().RetainRemappedFileBuffers = true;
-#if LLVM_VERSION_MAJOR >= 9 // rC357037
   clang->createFileManager(fs);
-#else
-  clang->setVirtualFileSystem(fs);
-  clang->createFileManager();
-#endif
   clang->setSourceManager(new SourceManager(clang->getDiagnostics(),
                                             clang->getFileManager(), true));
 
@@ -1332,39 +1331,23 @@ index(SemaManager *manager, WorkingFiles *wfiles, VFS *vfs,
   if (no_linkage) {
     indexOpts.IndexFunctionLocals = true;
     indexOpts.IndexImplicitInstantiation = true;
-#if LLVM_VERSION_MAJOR >= 9
-
     indexOpts.IndexParametersInDeclarations =
         g_config->index.parametersInDeclarations;
     indexOpts.IndexTemplateParameters = true;
-#endif
   }
 
-#if LLVM_VERSION_MAJOR >= 10 // rC370337
   auto action = std::make_unique<IndexFrontendAction>(
       std::make_shared<IndexDataConsumer>(param), indexOpts, param);
-#else
-  auto dataConsumer = std::make_shared<IndexDataConsumer>(param);
-  auto action = createIndexingAction(
-      dataConsumer, indexOpts,
-      std::make_unique<IndexFrontendAction>(dataConsumer, indexOpts, param));
-#endif
-
   std::string reason;
   {
     llvm::CrashRecoveryContext crc;
     auto parse = [&]() {
       if (!action->BeginSourceFile(*clang, clang->getFrontendOpts().Inputs[0]))
         return;
-#if LLVM_VERSION_MAJOR >= 9 // rL364464
       if (llvm::Error e = action->Execute()) {
         reason = llvm::toString(std::move(e));
         return;
       }
-#else
-      if (!action->Execute())
-        return;
-#endif
       action->EndSourceFile();
       ok = true;
     };

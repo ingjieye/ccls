@@ -13,19 +13,31 @@
 #include <clang/Driver/Tool.h>
 #include <clang/Lex/Lexer.h>
 #include <clang/Lex/PreprocessorOptions.h>
+#if LLVM_VERSION_MAJOR >= 16 // llvmorg-16-init-15123-gf09cf34d0062
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/Path.h>
 
 using namespace clang;
 
 namespace ccls {
+#if LLVM_VERSION_MAJOR < 19
 std::string pathFromFileEntry(const FileEntry &file) {
+#else
+std::string pathFromFileEntry(FileEntryRef file) {
+#endif
   std::string ret;
   if (file.getName().startswith("/../")) {
     // Resolve symlinks outside of working folders. This handles leading path
     // components, e.g. (/lib -> /usr/lib) in
     // /../lib/gcc/x86_64-linux-gnu/10/../../../../include/c++/10/utility
+#if LLVM_VERSION_MAJOR < 19
     ret = file.tryGetRealPathName();
+#else
+    ret = file.getFileEntry().tryGetRealPathName();
+#endif
   } else {
     // If getName() refers to a file within a workspace folder, we prefer it
     // (which may be a symlink).
@@ -151,29 +163,28 @@ buildCompilerInvocation(const std::string &main, std::vector<const char *> args,
     return nullptr;
   const llvm::opt::ArgStringList &cc_args = cmd.getArguments();
   auto ci = std::make_unique<CompilerInvocation>();
-#if LLVM_VERSION_MAJOR >= 10 // rC370122
   if (!CompilerInvocation::CreateFromArgs(*ci, cc_args, *diags))
-#else
-  if (!CompilerInvocation::CreateFromArgs(
-          *ci, cc_args.data(), cc_args.data() + cc_args.size(), *diags))
-#endif
     return nullptr;
 
   ci->getDiagnosticOpts().IgnoreWarnings = true;
   ci->getFrontendOpts().DisableFree = false;
   // Enable IndexFrontendAction::shouldSkipFunctionBody.
   ci->getFrontendOpts().SkipFunctionBodies = true;
+#if LLVM_VERSION_MAJOR >= 18
+  ci->getLangOpts().SpellChecking = false;
+  ci->getLangOpts().RecoveryAST = true;
+  ci->getLangOpts().RecoveryASTType = true;
+#else
   ci->getLangOpts()->SpellChecking = false;
 #if LLVM_VERSION_MAJOR >= 11
   ci->getLangOpts()->RecoveryAST = true;
   ci->getLangOpts()->RecoveryASTType = true;
 #endif
+#endif
   auto &isec = ci->getFrontendOpts().Inputs;
   if (isec.size())
     isec[0] = FrontendInputFile(main, isec[0].getKind(), isec[0].isSystem());
-#if LLVM_VERSION_MAJOR >= 10 // llvmorg-11-init-2414-g75f09b54429
   ci->getPreprocessorOpts().DisablePragmaDebugCrash = true;
-#endif
   // clangSerialization has an unstable format. Disable PCH reading/writing
   // to work around PCH mismatch problems.
   ci->getPreprocessorOpts().ImplicitPCHInclude.clear();
@@ -319,8 +330,12 @@ const char *clangBuiltinTypeName(int kind) {
     return "queue_t";
   case BuiltinType::OCLReserveID:
     return "reserve_id_t";
+#if LLVM_VERSION_MAJOR >= 19 // llvmorg-19-init-9465-g39adc8f42329
+  case BuiltinType::ArraySection:
+#else
   case BuiltinType::OMPArraySection:
-    return "<OpenMP array section type>";
+#endif
+    return "<array section type>";
   default:
     return "";
   }

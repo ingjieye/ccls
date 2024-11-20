@@ -4,7 +4,6 @@
 #include "pipeline.hh"
 
 #include "config.hh"
-#include "include_complete.hh"
 #include "log.hh"
 #include "lsp.hh"
 #include "message_handler.hh"
@@ -87,6 +86,7 @@ struct IndexRequest {
   bool must_exist = false;
   RequestId id;
   int64_t ts = tick++;
+  int prio = 0; // For didOpen sorting
 };
 
 std::mutex thread_mtx;
@@ -488,6 +488,23 @@ void indexer_Main(SemaManager *manager, VFS *vfs, Project *project,
         break;
 }
 
+void indexerSort(const std::unordered_map<std::string, int> &dir2prio) {
+  index_request->apply([&](std::deque<IndexRequest> &q) {
+    for (IndexRequest &request : q) {
+      std::string cur = lowerPathIfInsensitive(request.path);
+      while (!(cur = llvm::sys::path::parent_path(cur)).empty()) {
+        auto it = dir2prio.find(cur);
+        if (it != dir2prio.end()) {
+          request.prio = it->second;
+          LOG_V(3) << "set priority " << request.prio << " to " << request.path;
+          break;
+        }
+      }
+    }
+    std::stable_sort(q.begin(), q.end(), [](auto &l, auto &r) { return l.prio > r.prio; });
+  });
+}
+
 void main_OnIndexed(DB *db, WorkingFiles *wfiles, IndexUpdate *update) {
   if (update->refresh) {
     LOG_S(INFO)
@@ -499,6 +516,10 @@ void main_OnIndexed(DB *db, WorkingFiles *wfiles, IndexUpdate *update) {
         continue;
       QueryFile &file = db->files[db->name2file_id[path]];
       emitSemanticHighlight(db, wf.get(), file);
+    }
+    if (g_config->client.semanticTokensRefresh) {
+      std::optional<bool> param;
+      request("workspace/semanticTokens/refresh", param);
     }
     return;
   }
@@ -516,6 +537,12 @@ void main_OnIndexed(DB *db, WorkingFiles *wfiles, IndexUpdate *update) {
       QueryFile &file = db->files[update->file_id];
       emitSkippedRanges(wfile, file);
       emitSemanticHighlight(db, wfile, file);
+      if (g_config->client.semanticTokensRefresh) {
+        // Return filename, even if the spec indicates params is none.
+        TextDocumentIdentifier param;
+        param.uri = DocumentUri::fromPath(wfile->filename);
+        request("workspace/semanticTokens/refresh", param);
+      }
     }
   }
 }
@@ -639,7 +666,6 @@ void mainLoop() {
         }
       });
 
-  IncludeComplete include_complete(&project);
   DB db;
 
   // Setup shared references.
@@ -649,7 +675,6 @@ void mainLoop() {
   handler.vfs = &vfs;
   handler.wfiles = &wfiles;
   handler.manager = &manager;
-  handler.include_complete = &include_complete;
 
   bool work_done_created = false, in_progress = false;
   bool has_indexed = false;
@@ -769,14 +794,12 @@ void standalone(const std::string &root) {
       nullptr, nullptr,
       [](const std::string &, const std::vector<Diagnostic> &) {},
       [](const RequestId &id) {});
-  IncludeComplete complete(&project);
 
   MessageHandler handler;
   handler.project = &project;
   handler.wfiles = &wfiles;
   handler.vfs = &vfs;
   handler.manager = &manager;
-  handler.include_complete = &complete;
 
   standaloneInitialize(handler, root);
   bool tty = sys::Process::StandardOutIsDisplayed();
